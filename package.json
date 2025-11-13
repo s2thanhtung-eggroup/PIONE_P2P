@@ -1,0 +1,27 @@
+{
+  "name": "check-P2P",
+  "version": "1.0.0",
+  "description": "A smart contract system for managing cross-chain liquidity provision between PioneChain and BNB Smart Chain (BSC)",
+  "main": "index.js",
+  "scripts": {
+    "test": "hardhat test",
+    "deploy:bsc": "npx hardhat ignition deploy ./ignition/modules/PioneLiquidityManager.js --network bsc --verify",
+    "deploy:bscTestnet": "npx hardhat ignition deploy ./ignition/modules/PioneLiquidityManager.js --network bscTestnet --verify"
+  },
+  "keywords": [
+    "PIONECHAIN",
+    "PIO Token",
+    "PIO"
+  ],
+  "author": "pione labs",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "hardhat": "^2.26.1",
+    "hardhat-contract-sizer": "^2.10.1"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.4.0",
+    "dotenv": "^17.2.3"
+  }
+}
