@@ -8,7 +8,6 @@ pragma solidity ^0.8.20;
 interface IPriceOracle {
     /**
      * @notice Get current PIO price in USDT
-     * @return price Price in 6 decimals (e.g., 1000000 = 1 USDT per PIO)
      */
     function nativePriceInUSD() external view returns (uint256 price);
 }

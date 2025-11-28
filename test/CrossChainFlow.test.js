@@ -296,11 +296,12 @@ describe("Cross-Chain P2P Trading Flow", function () {
     });
   });
 
-  describe("Scenario 3: Buy PIO Flow (User on Pione wants to buy USDT)", function () {
-    let bscOrderId, pioneTradeId;
+  describe("Scenario 3: Buy USDT Flow (User on Pione wants to buy USDT with PIO)", function () {
+    let bscOrderId, pioneTradeId, bscTradeId;
     const LOCK_PIO_AMOUNT = ethers.parseEther("600"); // Lock 600 PIO
+    const EXPECTED_USDT = ethers.parseUnits("300", USDT_DECIMALS); // 600 PIO * 0.5 = 300 USDT
 
-    it("Should complete buy PIO flow: Lock PIO on Pione → Release to USDT seller on BSC", async function () {
+    it("Should complete buy USDT flow: Lock PIO on Pione → Release USDT on BSC → Release PIO to seller", async function () {
       // Step 1: USDT seller creates order on BSC
       const tx1 = await bscEscrow.connect(bscSeller).createOrder(
         USDT_AMOUNT,
@@ -320,7 +321,7 @@ describe("Cross-Chain P2P Trading Flow", function () {
 
       console.log("✓ BSC: USDT seller created order:", bscOrderId);
 
-      // Step 2: PIO buyer on Pione creates trade request and locks PIO
+      // Step 2: Pione user creates trade request and locks PIO to buy USDT
       const tx2 = await pioneEscrow.connect(buyer).createTradeRequest(
         bscOrderId,
         bscSellerOnPione.address, // USDT seller's address on Pione (to receive PIO)
@@ -336,35 +337,75 @@ describe("Cross-Chain P2P Trading Flow", function () {
       });
       pioneTradeId = pioneEscrow.interface.parseLog(event2).args.tradeId;
 
-      console.log("✓ Pione: Buyer locked PIO, trade ID:", pioneTradeId);
+      console.log("✓ Pione: Buyer locked", ethers.formatEther(LOCK_PIO_AMOUNT), "PIO, trade ID:", pioneTradeId);
 
       // Verify PIO is locked in contract
-      const contractBalance = await ethers.provider.getBalance(await pioneEscrow.getAddress());
-      expect(contractBalance).to.equal(LOCK_PIO_AMOUNT);
+      const contractBalancePione = await ethers.provider.getBalance(await pioneEscrow.getAddress());
+      expect(contractBalancePione).to.equal(LOCK_PIO_AMOUNT);
 
-      // Step 3: Bridge confirms and releases USDT to buyer on BSC
-      // (In real scenario, USDT would be released from the order on BSC)
+      // Step 3: Bridge creates corresponding trade on BSC to lock USDT
+      bscTradeId = pioneTradeId; // Use same ID for cross-chain tracking
+      await bscEscrow.connect(bridgeAdmin).createTrade(
+        bscTradeId,
+        bscOrderId,
+        buyer.address, // Pione buyer will receive USDT on BSC
+        EXPECTED_USDT
+      );
 
-      // Step 4: Bridge releases locked PIO to USDT seller on Pione
-      const sellerBalanceBefore = await ethers.provider.getBalance(bscSellerOnPione.address);
-      const feeRecipientBalanceBefore = await ethers.provider.getBalance(feeRecipient.address);
+      console.log("✓ BSC: Trade created, locked", ethers.formatUnits(EXPECTED_USDT, USDT_DECIMALS), "USDT");
+
+      // Verify USDT is locked from order
+      const order = await bscEscrow.getOrder(bscOrderId);
+      expect(order.availableUSDT).to.equal(USDT_AMOUNT - EXPECTED_USDT);
+
+      // Step 4: Bridge releases USDT to Pione buyer on BSC
+      const buyerUSDTBalanceBefore = await mockUSDT.balanceOf(buyer.address);
+      const feeRecipientUSDTBalanceBefore = await mockUSDT.balanceOf(feeRecipient.address);
+
+      await bscEscrow.connect(bridgeAdmin).releaseUSDTForBuyer(bscTradeId);
+
+      const buyerUSDTBalanceAfter = await mockUSDT.balanceOf(buyer.address);
+      const feeRecipientUSDTBalanceAfter = await mockUSDT.balanceOf(feeRecipient.address);
+
+      // Verify USDT amounts
+      const feePercentBSC = await bscEscrow.feePercent();
+      const expectedUSDTFee = (EXPECTED_USDT * feePercentBSC) / 10000n;
+      const expectedBuyerUSDT = EXPECTED_USDT - expectedUSDTFee;
+
+      expect(buyerUSDTBalanceAfter - buyerUSDTBalanceBefore).to.equal(expectedBuyerUSDT);
+      expect(feeRecipientUSDTBalanceAfter - feeRecipientUSDTBalanceBefore).to.equal(expectedUSDTFee);
+
+      console.log("✓ BSC: USDT released to buyer");
+      console.log("  - Buyer received:", ethers.formatUnits(expectedBuyerUSDT, USDT_DECIMALS), "USDT");
+      console.log("  - Fee collected:", ethers.formatUnits(expectedUSDTFee, USDT_DECIMALS), "USDT");
+
+      // Step 5: Bridge releases locked PIO to USDT seller on Pione
+      const sellerPIOBalanceBefore = await ethers.provider.getBalance(bscSellerOnPione.address);
+      const feeRecipientPIOBalanceBefore = await ethers.provider.getBalance(feeRecipient.address);
 
       await pioneEscrow.connect(bridgeAdmin).releasePIOForSeller(pioneTradeId);
 
-      const sellerBalanceAfter = await ethers.provider.getBalance(bscSellerOnPione.address);
-      const feeRecipientBalanceAfter = await ethers.provider.getBalance(feeRecipient.address);
+      const sellerPIOBalanceAfter = await ethers.provider.getBalance(bscSellerOnPione.address);
+      const feeRecipientPIOBalanceAfter = await ethers.provider.getBalance(feeRecipient.address);
 
-      // Verify amounts
-      const feePercent = await pioneEscrow.feePercent();
-      const expectedFee = (LOCK_PIO_AMOUNT * feePercent) / 10000n;
-      const expectedSellerAmount = LOCK_PIO_AMOUNT - expectedFee;
+      // Verify PIO amounts
+      const feePercentPione = await pioneEscrow.feePercent();
+      const expectedPIOFee = (LOCK_PIO_AMOUNT * feePercentPione) / 10000n;
+      const expectedSellerPIO = LOCK_PIO_AMOUNT - expectedPIOFee;
 
-      expect(sellerBalanceAfter - sellerBalanceBefore).to.equal(expectedSellerAmount);
-      expect(feeRecipientBalanceAfter - feeRecipientBalanceBefore).to.equal(expectedFee);
+      expect(sellerPIOBalanceAfter - sellerPIOBalanceBefore).to.equal(expectedSellerPIO);
+      expect(feeRecipientPIOBalanceAfter - feeRecipientPIOBalanceBefore).to.equal(expectedPIOFee);
 
       console.log("✓ Pione: PIO released to USDT seller");
-      console.log("  - Seller received:", ethers.formatEther(expectedSellerAmount), "PIO");
-      console.log("  - Fee collected:", ethers.formatEther(expectedFee), "PIO");
+      console.log("  - Seller received:", ethers.formatEther(expectedSellerPIO), "PIO");
+      console.log("  - Fee collected:", ethers.formatEther(expectedPIOFee), "PIO");
+
+      // Verify both trades are completed
+      const buyUSDTTrade = await pioneEscrow.getBuyUSDTTrade(pioneTradeId);
+      expect(buyUSDTTrade.status).to.equal(2); // TradeStatus.Paid
+
+      const sellUSDTTrade = await bscEscrow.getSellUSDTTrade(bscTradeId);
+      expect(sellUSDTTrade.status).to.equal(2); // TradeStatus.Paid
     });
 
     it("Should handle trade request cancellation and refund PIO to buyer", async function () {
@@ -413,11 +454,12 @@ describe("Cross-Chain P2P Trading Flow", function () {
     });
   });
 
-  describe("Scenario 4: Buy USDT Flow (User on BSC wants to buy PIO)", function () {
-    let pioneOrderId, bscTradeId;
-    const LOCK_USDT_AMOUNT = ethers.parseUnits("300", USDT_DECIMALS);
+  describe("Scenario 4: Buy PIO Flow (User on BSC wants to buy PIO with USDT)", function () {
+    let pioneOrderId, bscTradeId, pioneTradeId;
+    const LOCK_USDT_AMOUNT = ethers.parseUnits("200", USDT_DECIMALS); // 200 USDT
+    const EXPECTED_PIO = ethers.parseEther("400"); // 200 USDT / 0.5 = 400 PIO (within max 500 PIO limit)
 
-    it("Should complete buy USDT flow: Lock USDT on BSC → Release to PIO seller on Pione", async function () {
+    it("Should complete buy PIO flow: Lock USDT on BSC → Release PIO on Pione → Release USDT to seller", async function () {
       // Step 1: PIO seller creates order on Pione
       const tx1 = await pioneEscrow.connect(pioneSeller).createOrder(
         PIO_MIN_PER_TRADE,
@@ -437,7 +479,7 @@ describe("Cross-Chain P2P Trading Flow", function () {
 
       console.log("✓ Pione: PIO seller created order:", pioneOrderId);
 
-      // Step 2: USDT buyer on BSC creates trade request and locks USDT
+      // Step 2: BSC user creates trade request and locks USDT to buy PIO
       const tx2 = await bscEscrow.connect(buyer).createTradeRequest(
         pioneOrderId,
         pioneSellerOnBSC.address, // PIO seller's address on BSC (to receive USDT)
@@ -453,32 +495,75 @@ describe("Cross-Chain P2P Trading Flow", function () {
       });
       bscTradeId = bscEscrow.interface.parseLog(event2).args.tradeId;
 
-      console.log("✓ BSC: Buyer locked USDT, trade ID:", bscTradeId);
+      console.log("✓ BSC: Buyer locked", ethers.formatUnits(LOCK_USDT_AMOUNT, USDT_DECIMALS), "USDT, trade ID:", bscTradeId);
 
       // Verify USDT is locked in contract
-      const contractBalance = await mockUSDT.balanceOf(await bscEscrow.getAddress());
-      expect(contractBalance).to.equal(LOCK_USDT_AMOUNT);
+      const contractBalanceBSC = await mockUSDT.balanceOf(await bscEscrow.getAddress());
+      expect(contractBalanceBSC).to.equal(LOCK_USDT_AMOUNT);
 
-      // Step 3: Bridge releases locked USDT to PIO seller on BSC
-      const sellerBalanceBefore = await mockUSDT.balanceOf(pioneSellerOnBSC.address);
-      const feeRecipientBalanceBefore = await mockUSDT.balanceOf(feeRecipient.address);
+      // Step 3: Bridge creates corresponding trade on Pione to lock PIO
+      pioneTradeId = bscTradeId; // Use same ID for cross-chain tracking
+      await pioneEscrow.connect(bridgeAdmin).createTrade(
+        pioneTradeId,
+        pioneOrderId,
+        buyer.address, // BSC buyer will receive PIO on Pione
+        EXPECTED_PIO
+      );
+
+      console.log("✓ Pione: Trade created, locked", ethers.formatEther(EXPECTED_PIO), "PIO");
+
+      // Verify PIO is locked from order
+      const order = await pioneEscrow.getOrder(pioneOrderId);
+      expect(order.availablePIO).to.equal(PIO_AMOUNT - EXPECTED_PIO);
+
+      // Step 4: Bridge releases PIO to BSC buyer on Pione
+      const buyerPIOBalanceBefore = await ethers.provider.getBalance(buyer.address);
+      const feeRecipientPIOBalanceBefore = await ethers.provider.getBalance(feeRecipient.address);
+
+      await pioneEscrow.connect(bridgeAdmin).releasePIOForBuyer(pioneTradeId);
+
+      const buyerPIOBalanceAfter = await ethers.provider.getBalance(buyer.address);
+      const feeRecipientPIOBalanceAfter = await ethers.provider.getBalance(feeRecipient.address);
+
+      // Verify PIO amounts
+      const feePercentPione = await pioneEscrow.feePercent();
+      const expectedPIOFee = (EXPECTED_PIO * feePercentPione) / 10000n;
+      const expectedBuyerPIO = EXPECTED_PIO - expectedPIOFee;
+
+      expect(buyerPIOBalanceAfter - buyerPIOBalanceBefore).to.equal(expectedBuyerPIO);
+      expect(feeRecipientPIOBalanceAfter - feeRecipientPIOBalanceBefore).to.equal(expectedPIOFee);
+
+      console.log("✓ Pione: PIO released to buyer");
+      console.log("  - Buyer received:", ethers.formatEther(expectedBuyerPIO), "PIO");
+      console.log("  - Fee collected:", ethers.formatEther(expectedPIOFee), "PIO");
+
+      // Step 5: Bridge releases locked USDT to PIO seller on BSC
+      const sellerUSDTBalanceBefore = await mockUSDT.balanceOf(pioneSellerOnBSC.address);
+      const feeRecipientUSDTBalanceBefore = await mockUSDT.balanceOf(feeRecipient.address);
 
       await bscEscrow.connect(bridgeAdmin).releaseUSDTForSeller(bscTradeId);
 
-      const sellerBalanceAfter = await mockUSDT.balanceOf(pioneSellerOnBSC.address);
-      const feeRecipientBalanceAfter = await mockUSDT.balanceOf(feeRecipient.address);
+      const sellerUSDTBalanceAfter = await mockUSDT.balanceOf(pioneSellerOnBSC.address);
+      const feeRecipientUSDTBalanceAfter = await mockUSDT.balanceOf(feeRecipient.address);
 
-      // Verify amounts
-      const feePercent = await bscEscrow.feePercent();
-      const expectedFee = (LOCK_USDT_AMOUNT * feePercent) / 10000n;
-      const expectedSellerAmount = LOCK_USDT_AMOUNT - expectedFee;
+      // Verify USDT amounts
+      const feePercentBSC = await bscEscrow.feePercent();
+      const expectedUSDTFee = (LOCK_USDT_AMOUNT * feePercentBSC) / 10000n;
+      const expectedSellerUSDT = LOCK_USDT_AMOUNT - expectedUSDTFee;
 
-      expect(sellerBalanceAfter - sellerBalanceBefore).to.equal(expectedSellerAmount);
-      expect(feeRecipientBalanceAfter - feeRecipientBalanceBefore).to.equal(expectedFee);
+      expect(sellerUSDTBalanceAfter - sellerUSDTBalanceBefore).to.equal(expectedSellerUSDT);
+      expect(feeRecipientUSDTBalanceAfter - feeRecipientUSDTBalanceBefore).to.equal(expectedUSDTFee);
 
       console.log("✓ BSC: USDT released to PIO seller");
-      console.log("  - Seller received:", ethers.formatUnits(expectedSellerAmount, USDT_DECIMALS), "USDT");
-      console.log("  - Fee collected:", ethers.formatUnits(expectedFee, USDT_DECIMALS), "USDT");
+      console.log("  - Seller received:", ethers.formatUnits(expectedSellerUSDT, USDT_DECIMALS), "USDT");
+      console.log("  - Fee collected:", ethers.formatUnits(expectedUSDTFee, USDT_DECIMALS), "USDT");
+
+      // Verify both trades are completed
+      const buyPIOTrade = await bscEscrow.getBuyPIOTrade(bscTradeId);
+      expect(buyPIOTrade.status).to.equal(2); // TradeStatus.Paid
+
+      const sellPIOTrade = await pioneEscrow.getSellPIOTrade(pioneTradeId);
+      expect(sellPIOTrade.status).to.equal(2); // TradeStatus.Paid
     });
 
     it("Should handle trade request cancellation and refund USDT to buyer", async function () {

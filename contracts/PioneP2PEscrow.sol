@@ -208,6 +208,7 @@ contract PioneP2PEscrow is ReentrancyGuard, Pausable, AccessControl {
         require(order.status == OrderStatus.Active, "Order not active");
         require(_pioAmount <= order.availablePIO, "Insufficient PIO");
         require(_pioAmount >= order.minPerTrade && _pioAmount <= order.maxPerTrade, "Invalid amount");
+        require(sellPIOTrades[_bscTradeId].seller == address(0), "Trade exists");
 
         // Lock PIO from order
         order.availablePIO -= _pioAmount;
@@ -222,7 +223,6 @@ contract PioneP2PEscrow is ReentrancyGuard, Pausable, AccessControl {
             feeSnapshot: (feeTo != address(0)) ? feePercent : 0,
             status: TradeStatus.Created
         });
-        
         orderTrades[_orderId].push(_bscTradeId);
 
         emit TradeCreated(
@@ -303,6 +303,7 @@ contract PioneP2PEscrow is ReentrancyGuard, Pausable, AccessControl {
      */
     function cancelOrder(bytes32 _orderId) external  nonReentrant {
         Order storage order = orders[_orderId];
+        require(order.seller != address(0), "Order not found");
         require(msg.sender == order.seller || hasRole(BRIDGE_ADMIN_ROLE, msg.sender), "Not seller");
         require(order.status == OrderStatus.Active, "Cannot cancel");
 

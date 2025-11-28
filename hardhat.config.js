@@ -1,5 +1,6 @@
 require("@nomicfoundation/hardhat-toolbox");
 require("hardhat-contract-sizer");
+require("@nomicfoundation/hardhat-verify");
 require("dotenv").config();
 
 const PRIVATE_KEY = process.env.PRIVATE_KEY || "";
@@ -42,11 +43,6 @@ module.exports = {
       chainId: 5080,
       accounts: [PRIVATE_KEY]
     },
-    sepolia: {
-      url: `https://sepolia.infura.io/v3/${INFURA_KEY}`,
-      chainId: 11155111,
-      accounts: [PRIVATE_KEY], 
-    },
     bscTestnet: {
       url: `https://bsc-testnet.infura.io/v3/${INFURA_KEY}`,
       accounts: [PRIVATE_KEY], 
@@ -56,18 +52,13 @@ module.exports = {
       url: `https://bsc-mainnet.infura.io/v3/${INFURA_KEY}`,
       accounts: [PRIVATE_KEY],
       chainId: 56,
-    },
-    mainnet: {
-      url: `https://mainnet.infura.io/v3/${INFURA_KEY}`,
-      accounts: [PRIVATE_KEY],
-      chainId: 1,
     }
   },
   etherscan: {
-    apiKey: EXPLORER_API_KEY,
-    // apiKey: {
-    //   pioneZero: EXPLORER_API_KEY,
-    // },
+    // apiKey: EXPLORER_API_KEY,
+    apiKey: {
+      pione: EXPLORER_API_KEY,
+    },
     customChains: [
       {
         network: "pione",

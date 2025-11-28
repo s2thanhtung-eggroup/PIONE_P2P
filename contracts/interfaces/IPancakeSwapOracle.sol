@@ -9,8 +9,8 @@ pragma solidity ^0.8.20;
 interface IPancakeSwapOracle {
     /**
      * @notice Get the current price of PIO in USDT
-     * @return price Price per PIO in USDT (6 decimals precision)
-     * @dev For example: if 1 PIO = 0.05 USDT, returns 50000 (0.05 * 1e6)
+     * @return price Price per PIO in USDT
+     * @dev For example: if 1 PIO = 0.05 USDT, returns 50000 (0.05 * 1e18)
      */
     function getPIOPriceInUSDT() external view returns (uint256 price);
 

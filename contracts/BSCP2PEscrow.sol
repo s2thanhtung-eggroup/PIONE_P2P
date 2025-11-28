@@ -233,8 +233,8 @@ contract BSCP2PEscrow is ReentrancyGuard, Pausable, AccessControl {
         require(_usdtAmount <= order.availableUSDT, "Insufficient USDT");
         require(_usdtAmount >= order.minPerTrade && _usdtAmount <= order.maxPerTrade, "Invalid amount");
         require(sellUSDTTrades[_pioneTradeId].seller == address(0), "Trade exists");
+        
         order.availableUSDT -= _usdtAmount;
-
         sellUSDTTrades[_pioneTradeId] = SellUSDTTrade({
             orderId: _orderId,
             seller: order.seller,
@@ -318,6 +318,7 @@ contract BSCP2PEscrow is ReentrancyGuard, Pausable, AccessControl {
      */
     function cancelOrder(bytes32 _orderId) external nonReentrant {
         Order storage order = orders[_orderId];
+        require(order.seller != address(0), "Order not found");
         require(msg.sender == order.seller || hasRole(BRIDGE_ADMIN_ROLE, msg.sender), "Not seller");
         require(order.status == OrderStatus.Active, "Cannot cancel");
 
@@ -491,16 +492,6 @@ contract BSCP2PEscrow is ReentrancyGuard, Pausable, AccessControl {
         return userTrades[_user];
     }
 
-    function updateFee(uint16 _newFee) external onlyRole(ADMIN_ROLE) {
-        require(_newFee <= 1000, "Fee too high");
-        feePercent = _newFee;
-    }
-
-    function updatePancakePair(address _newPair) external onlyRole(ADMIN_ROLE) {
-        require(_newPair != address(0), "Invalid pair");
-        pancakePairAddress = _newPair;
-    }
-
     function updateOrderLimits(
         bytes32 _orderId,
         uint256 _newMinPerTrade,
@@ -531,6 +522,17 @@ contract BSCP2PEscrow is ReentrancyGuard, Pausable, AccessControl {
 
         order.pricePerPIO = _newPricePerPIO;
     }
+
+    function updateFee(uint16 _newFee) external onlyRole(ADMIN_ROLE) {
+        require(_newFee <= 1000, "Fee too high");
+        feePercent = _newFee;
+    }
+
+    function updatePancakePair(address _newPair) external onlyRole(ADMIN_ROLE) {
+        require(_newPair != address(0), "Invalid pair");
+        pancakePairAddress = _newPair;
+    }
+
 
     function updatePriceTolerance(uint16 _newTolerance) external onlyRole(ADMIN_ROLE) {
         uint16 oldValue = priceTolerancePercent;
